@@ -2,187 +2,93 @@ Config = {}
 
 Config.progressPerCatch = 0.05 -- The progress per one fish caught
 
--- New: Weather effects on fishing
+-- Enhanced: Weather effects on fishing
 Config.weatherEffects = {
-    ['RAIN'] = { waitMultiplier = 0.8, chanceBonus = 10 }, -- Rain makes fish more active
-    ['THUNDER'] = { waitMultiplier = 0.7, chanceBonus = 15 }, -- Thunder storms are great for fishing
-    ['FOGGY'] = { waitMultiplier = 1.2, chanceBonus = -5 }, -- Fog makes fishing harder
-    ['CLEAR'] = { waitMultiplier = 1.0, chanceBonus = 0 }, -- Normal conditions
+    ['CLEAR'] = { waitMultiplier = 1.0, chanceBonus = 0, message = 'Perfect fishing weather!' },
+    ['CLOUDY'] = { waitMultiplier = 0.95, chanceBonus = 2, message = 'Cloudy skies help fishing.' },
+    ['OVERCAST'] = { waitMultiplier = 0.9, chanceBonus = 5, message = 'Overcast conditions are great for fishing!' },
+    ['RAIN'] = { waitMultiplier = 0.8, chanceBonus = 10, message = 'Rain makes fish more active!' },
+    ['THUNDER'] = { waitMultiplier = 0.7, chanceBonus = 15, message = 'Thunder storms bring out the big fish!' },
+    ['FOGGY'] = { waitMultiplier = 1.3, chanceBonus = -10, message = 'Fog makes fishing more difficult.' },
+    ['SNOW'] = { waitMultiplier = 1.4, chanceBonus = -15, message = 'Cold weather slows down fish activity.' },
+    ['BLIZZARD'] = { waitMultiplier = 1.6, chanceBonus = -20, message = 'Blizzard conditions are harsh for fishing.' },
 }
 
--- New: Time of day effects
+-- Enhanced: Time of day effects (fixed time ranges)
 Config.timeEffects = {
-    dawn = { hour = 6, waitMultiplier = 0.9, chanceBonus = 5 }, -- Early morning
-    dusk = { hour = 18, waitMultiplier = 0.9, chanceBonus = 5 }, -- Evening
+    night = { startHour = 21, endHour = 4, waitMultiplier = 1.3, chanceBonus = -8, message = 'Night fishing is challenging.' },
+    dawn = { startHour = 5, endHour = 7, waitMultiplier = 0.85, chanceBonus = 8, message = 'Dawn - prime fishing time!' },
+    morning = { startHour = 8, endHour = 11, waitMultiplier = 1.0, chanceBonus = 0, message = 'Morning fishing is steady.' },
+    noon = { startHour = 12, endHour = 14, waitMultiplier = 1.2, chanceBonus = -5, message = 'Fish are less active in the heat.' },
+    afternoon = { startHour = 15, endHour = 17, waitMultiplier = 1.1, chanceBonus = 0, message = 'Afternoon fishing is decent.' },
+    dusk = { startHour = 18, endHour = 20, waitMultiplier = 0.85, chanceBonus = 8, message = 'Dusk - another prime time!' }
+}
+
+-- Enhanced: Seasonal effects with fish bonuses
+Config.seasons = {
+    spring = { 
+        months = {3, 4, 5}, 
+        message = 'Spring brings active fish!',
+        fishBonus = { 'salmon', 'trout', 'bass' }
+    },
+    summer = { 
+        months = {6, 7, 8}, 
+        message = 'Summer heat affects some species.',
+        fishBonus = { 'mahi_mahi', 'red_snapper', 'grouper', 'barracuda' }
+    },
+    autumn = { 
+        months = {9, 10, 11}, 
+        message = 'Autumn migration season!',
+        fishBonus = { 'salmon', 'haddock', 'cod' }
+    },
+    winter = { 
+        months = {12, 1, 2}, 
+        message = 'Winter fishing requires patience.',
+        fishBonus = { 'haddock', 'cod', 'sea_bass' }
+    }
 }
 
 ---@class Fish
 ---@field price integer | { min: integer, max: integer }
 ---@field chance integer Percentage chance
 ---@field skillcheck SkillCheckDifficulity
----@field rarity string -- New: rarity classification
----@field season table<string, boolean>? -- New: seasonal availability
----@field timePreference table<string, boolean>? -- New: time preferences
+---@field rarity string -- Rarity classification
 
 ---@type table<string, Fish>
 Config.fish = {
-    -- Common Fish (Level 1-2)
-    ['anchovy'] = { 
-        price = { min = 25, max = 50 }, 
-        chance = 35, 
-        skillcheck = { 'easy', 'medium' },
-        rarity = 'common',
-        season = { spring = true, summer = true, autumn = true, winter = true }
-    },
-    ['sardine'] = { 
-        price = { min = 20, max = 40 }, 
-        chance = 40, 
-        skillcheck = { 'easy' },
-        rarity = 'common',
-        season = { spring = true, summer = true, autumn = true, winter = true }
-    },
-    ['mackerel'] = { 
-        price = { min = 30, max = 60 }, 
-        chance = 30, 
-        skillcheck = { 'easy', 'medium' },
-        rarity = 'common',
-        timePreference = { dawn = true, dusk = true }
-    },
-    ['trout'] = { 
-        price = { min = 50, max = 100 }, 
-        chance = 35, 
-        skillcheck = { 'easy', 'medium' },
-        rarity = 'common',
-        season = { spring = true, summer = true, autumn = true }
-    },
-    ['bass'] = { 
-        price = { min = 60, max = 120 }, 
-        chance = 25, 
-        skillcheck = { 'easy', 'medium' },
-        rarity = 'common',
-        timePreference = { dawn = true, dusk = true }
-    },
+    -- Common Fish
+    ['anchovy'] = { price = { min = 25, max = 50 }, chance = 35, skillcheck = { 'easy', 'medium' }, rarity = 'common' },
+    ['sardine'] = { price = { min = 20, max = 40 }, chance = 40, skillcheck = { 'easy' }, rarity = 'common' },
+    ['mackerel'] = { price = { min = 30, max = 60 }, chance = 30, skillcheck = { 'easy', 'medium' }, rarity = 'common' },
+    ['trout'] = { price = { min = 50, max = 100 }, chance = 35, skillcheck = { 'easy', 'medium' }, rarity = 'common' },
+    ['bass'] = { price = { min = 60, max = 120 }, chance = 25, skillcheck = { 'easy', 'medium' }, rarity = 'common' },
     
-    -- Uncommon Fish (Level 2-3)
-    ['haddock'] = { 
-        price = { min = 150, max = 200 }, 
-        chance = 20, 
-        skillcheck = { 'easy', 'medium' },
-        rarity = 'uncommon',
-        season = { autumn = true, winter = true }
-    },
-    ['cod'] = { 
-        price = { min = 120, max = 180 }, 
-        chance = 22, 
-        skillcheck = { 'easy', 'medium' },
-        rarity = 'uncommon',
-        season = { autumn = true, winter = true, spring = true }
-    },
-    ['salmon'] = { 
-        price = { min = 200, max = 250 }, 
-        chance = 15, 
-        skillcheck = { 'easy', 'medium', 'medium' },
-        rarity = 'uncommon',
-        season = { spring = true, autumn = true }
-    },
-    ['sea_bass'] = { 
-        price = { min = 180, max = 240 }, 
-        chance = 18, 
-        skillcheck = { 'easy', 'medium', 'medium' },
-        rarity = 'uncommon'
-    },
+    -- Uncommon Fish  
+    ['haddock'] = { price = { min = 150, max = 200 }, chance = 20, skillcheck = { 'easy', 'medium' }, rarity = 'uncommon' },
+    ['cod'] = { price = { min = 120, max = 180 }, chance = 22, skillcheck = { 'easy', 'medium' }, rarity = 'uncommon' },
+    ['salmon'] = { price = { min = 200, max = 250 }, chance = 15, skillcheck = { 'easy', 'medium', 'medium' }, rarity = 'uncommon' },
+    ['sea_bass'] = { price = { min = 180, max = 240 }, chance = 18, skillcheck = { 'easy', 'medium', 'medium' }, rarity = 'uncommon' },
     
-    -- Rare Fish (Level 3-4)
-    ['grouper'] = { 
-        price = { min = 300, max = 350 }, 
-        chance = 12, 
-        skillcheck = { 'easy', 'medium', 'medium', 'medium' },
-        rarity = 'rare',
-        season = { summer = true, autumn = true }
-    },
-    ['snook'] = { 
-        price = { min = 280, max = 340 }, 
-        chance = 14, 
-        skillcheck = { 'easy', 'medium', 'medium' },
-        rarity = 'rare',
-        season = { summer = true }
-    },
-    ['piranha'] = { 
-        price = { min = 350, max = 450 }, 
-        chance = 10, 
-        skillcheck = { 'easy', 'medium', 'hard' },
-        rarity = 'rare'
-    },
-    ['red_snapper'] = { 
-        price = { min = 400, max = 450 }, 
-        chance = 8, 
-        skillcheck = { 'easy', 'medium', 'medium', 'medium' },
-        rarity = 'rare',
-        season = { summer = true, autumn = true }
-    },
-    ['barracuda'] = { 
-        price = { min = 420, max = 480 }, 
-        chance = 7, 
-        skillcheck = { 'easy', 'medium', 'hard' },
-        rarity = 'rare'
-    },
+    -- Rare Fish
+    ['grouper'] = { price = { min = 300, max = 350 }, chance = 12, skillcheck = { 'easy', 'medium', 'medium', 'medium' }, rarity = 'rare' },
+    ['snook'] = { price = { min = 280, max = 340 }, chance = 14, skillcheck = { 'easy', 'medium', 'medium' }, rarity = 'rare' },
+    ['piranha'] = { price = { min = 350, max = 450 }, chance = 10, skillcheck = { 'easy', 'medium', 'hard' }, rarity = 'rare' },
+    ['red_snapper'] = { price = { min = 400, max = 450 }, chance = 8, skillcheck = { 'easy', 'medium', 'medium', 'medium' }, rarity = 'rare' },
+    ['barracuda'] = { price = { min = 420, max = 480 }, chance = 7, skillcheck = { 'easy', 'medium', 'hard' }, rarity = 'rare' },
     
-    -- Epic Fish (Level 4-5)
-    ['mahi_mahi'] = { 
-        price = { min = 450, max = 500 }, 
-        chance = 6, 
-        skillcheck = { 'easy', 'medium', 'medium', 'medium' },
-        rarity = 'epic',
-        season = { spring = true, summer = true }
-    },
-    ['yellowfin_tuna'] = { 
-        price = { min = 800, max = 1000 }, 
-        chance = 4, 
-        skillcheck = { 'easy', 'medium', 'hard', 'hard' },
-        rarity = 'epic',
-        timePreference = { dawn = true }
-    },
-    ['swordfish'] = { 
-        price = { min = 900, max = 1200 }, 
-        chance = 3, 
-        skillcheck = { 'medium', 'hard', 'hard' },
-        rarity = 'epic'
-    },
-    ['tuna'] = { 
-        price = { min = 1250, max = 1500 }, 
-        chance = 3, 
-        skillcheck = { 'easy', 'medium', 'hard' },
-        rarity = 'epic'
-    },
+    -- Epic Fish
+    ['mahi_mahi'] = { price = { min = 450, max = 500 }, chance = 6, skillcheck = { 'easy', 'medium', 'medium', 'medium' }, rarity = 'epic' },
+    ['yellowfin_tuna'] = { price = { min = 800, max = 1000 }, chance = 4, skillcheck = { 'easy', 'medium', 'hard', 'hard' }, rarity = 'epic' },
+    ['swordfish'] = { price = { min = 900, max = 1200 }, chance = 3, skillcheck = { 'medium', 'hard', 'hard' }, rarity = 'epic' },
+    ['tuna'] = { price = { min = 1250, max = 1500 }, chance = 3, skillcheck = { 'easy', 'medium', 'hard' }, rarity = 'epic' },
     
-    -- Legendary Fish (Level 5+)
-    ['blue_marlin'] = { 
-        price = { min = 2000, max = 2500 }, 
-        chance = 1, 
-        skillcheck = { 'medium', 'hard', 'hard', 'hard' },
-        rarity = 'legendary',
-        timePreference = { dawn = true, dusk = true }
-    },
-    ['shark'] = { 
-        price = { min = 2250, max = 2750 }, 
-        chance = 1, 
-        skillcheck = { 'easy', 'medium', 'hard' },
-        rarity = 'legendary'
-    },
-    ['giant_squid'] = { 
-        price = { min = 3000, max = 4000 }, 
-        chance = 0.5, 
-        skillcheck = { 'hard', 'hard', 'hard', 'hard' },
-        rarity = 'legendary'
-    },
+    -- Legendary Fish
+    ['blue_marlin'] = { price = { min = 2000, max = 2500 }, chance = 1, skillcheck = { 'medium', 'hard', 'hard', 'hard' }, rarity = 'legendary' },
+    ['shark'] = { price = { min = 2250, max = 2750 }, chance = 1, skillcheck = { 'easy', 'medium', 'hard' }, rarity = 'legendary' },
+    ['giant_squid'] = { price = { min = 3000, max = 4000 }, chance = 0.5, skillcheck = { 'hard', 'hard', 'hard', 'hard' }, rarity = 'legendary' },
     
-    -- Mythical Fish (Level 6+) - Ultra rare
-    ['kraken_tentacle'] = { 
-        price = { min = 5000, max = 7500 }, 
-        chance = 0.1, 
-        skillcheck = { 'hard', 'hard', 'hard', 'hard', 'hard' },
-        rarity = 'mythical'
-    },
+    -- Mythical Fish
+    ['kraken_tentacle'] = { price = { min = 5000, max = 7500 }, chance = 0.1, skillcheck = { 'hard', 'hard', 'hard', 'hard', 'hard' }, rarity = 'mythical' },
 }
 
 ---@class FishingRod
@@ -190,16 +96,14 @@ Config.fish = {
 ---@field price integer
 ---@field minLevel integer The minimal level
 ---@field breakChance integer Percentage chance
----@field catchBonus number -- New: catch rate multiplier
----@field durability integer -- New: uses before breaking
 
 ---@type FishingRod[]
 Config.fishingRods = {
-    { name = 'basic_rod', price = 1000, minLevel = 1, breakChance = 20, catchBonus = 1.0, durability = 50 },
-    { name = 'graphite_rod', price = 2500, minLevel = 2, breakChance = 10, catchBonus = 1.1, durability = 100 },
-    { name = 'titanium_rod', price = 5000, minLevel = 3, breakChance = 1, catchBonus = 1.2, durability = 200 },
-    { name = 'carbon_fiber_rod', price = 10000, minLevel = 4, breakChance = 0.5, catchBonus = 1.3, durability = 300 },
-    { name = 'legendary_rod', price = 25000, minLevel = 5, breakChance = 0.1, catchBonus = 1.5, durability = 500 },
+    { name = 'basic_rod', price = 1000, minLevel = 1, breakChance = 20 },
+    { name = 'graphite_rod', price = 2500, minLevel = 2, breakChance = 10 },
+    { name = 'titanium_rod', price = 5000, minLevel = 3, breakChance = 1 },
+    { name = 'carbon_fiber_rod', price = 10000, minLevel = 4, breakChance = 0.5 },
+    { name = 'legendary_rod', price = 25000, minLevel = 5, breakChance = 0.1 },
 }
 
 ---@class FishingBait
@@ -207,59 +111,14 @@ Config.fishingRods = {
 ---@field price integer
 ---@field minLevel integer The minimal level
 ---@field waitDivisor number The total wait time gets divided by this value
----@field rarityBonus table<string, number>? -- New: bonus chance for specific rarities
 
 ---@type FishingBait[]
 Config.baits = {
     { name = 'worms', price = 5, minLevel = 1, waitDivisor = 1.0 },
     { name = 'artificial_bait', price = 50, minLevel = 2, waitDivisor = 3.0 },
-    { name = 'premium_lure', price = 150, minLevel = 3, waitDivisor = 4.0, rarityBonus = { rare = 1.2, epic = 1.1 } },
-    { name = 'legendary_lure', price = 500, minLevel = 4, waitDivisor = 5.0, rarityBonus = { epic = 1.3, legendary = 1.2 } },
-    { name = 'mythical_bait', price = 2000, minLevel = 5, waitDivisor = 6.0, rarityBonus = { legendary = 1.5, mythical = 2.0 } },
-}
-
--- New: Fishing tournaments
-Config.tournaments = {
-    enabled = true,
-    duration = 3600000, -- 1 hour in milliseconds
-    cooldown = 7200000, -- 2 hours between tournaments
-    rewards = {
-        [1] = { money = 10000, items = { ['legendary_rod'] = 1 } },
-        [2] = { money = 7500, items = { ['carbon_fiber_rod'] = 1 } },
-        [3] = { money = 5000, items = { ['premium_lure'] = 10 } },
-    }
-}
-
--- New: Fishing contracts/missions
-Config.contracts = {
-    enabled = true,
-    refreshInterval = 3600000, -- 1 hour
-    maxActive = 3,
-    types = {
-        {
-            type = 'catch_specific',
-            title = 'Catch %d %s',
-            description = 'The local restaurant needs fresh %s for tonight\'s menu.',
-            targetFish = { 'salmon', 'tuna', 'red_snapper' },
-            targetAmount = { min = 3, max = 8 },
-            reward = { money = { min = 500, max = 1500 }, xp = 0.1 }
-        },
-        {
-            type = 'catch_rarity',
-            title = 'Catch %d %s fish',
-            description = 'A collector is looking for rare specimens.',
-            targetRarity = { 'rare', 'epic', 'legendary' },
-            targetAmount = { min = 1, max = 3 },
-            reward = { money = { min = 1000, max = 3000 }, xp = 0.2 }
-        },
-        {
-            type = 'catch_value',
-            title = 'Catch fish worth $%d',
-            description = 'Prove your fishing skills by catching valuable fish.',
-            targetValue = { min = 2000, max = 5000 },
-            reward = { money = { min = 800, max = 2000 }, xp = 0.15 }
-        }
-    }
+    { name = 'premium_lure', price = 150, minLevel = 3, waitDivisor = 4.0 },
+    { name = 'legendary_lure', price = 500, minLevel = 4, waitDivisor = 5.0 },
+    { name = 'mythical_bait', price = 2000, minLevel = 5, waitDivisor = 6.0 },
 }
 
 ---@class FishingZone
@@ -271,7 +130,7 @@ Config.contracts = {
 ---@field blip BlipData?
 ---@field message { enter: string, exit: string }?
 ---@field fishList string[]
----@field rarityMultiplier table<string, number>? -- New: rarity chance multipliers
+---@field rarityMultiplier table<string, number>? -- Rarity chance multipliers
 
 ---@type FishingZone[]
 Config.fishingZones = {
@@ -322,7 +181,6 @@ Config.fishingZones = {
         },
         locations = {
             vector3(-4941.7964, -2411.9146, 0.0),
-            vector3(-3500.0, -4000.0, 0.0)
         },
         radius = 1000.0,
         minLevel = 4,
@@ -358,7 +216,7 @@ Config.fishingZones = {
             scale = 0.7
         },
         locations = {
-            vector3(-6000.0, -6000.0, 0.0), -- Far out in the ocean
+            vector3(-6000.0, -6000.0, 0.0),
         },
         radius = 500.0,
         minLevel = 6,
@@ -378,38 +236,6 @@ Config.outside = {
     }
 }
 
--- New: Fishing achievements
-Config.achievements = {
-    {
-        id = 'first_catch',
-        title = 'First Catch',
-        description = 'Catch your first fish',
-        requirement = { type = 'total_caught', amount = 1 },
-        reward = { xp = 0.1, money = 100 }
-    },
-    {
-        id = 'rare_hunter',
-        title = 'Rare Hunter',
-        description = 'Catch 10 rare fish',
-        requirement = { type = 'rarity_caught', rarity = 'rare', amount = 10 },
-        reward = { xp = 0.5, money = 1000 }
-    },
-    {
-        id = 'legend_fisher',
-        title = 'Legend Fisher',
-        description = 'Catch a legendary fish',
-        requirement = { type = 'rarity_caught', rarity = 'legendary', amount = 1 },
-        reward = { xp = 1.0, money = 5000, items = { ['legendary_lure'] = 5 } }
-    },
-    {
-        id = 'zone_master',
-        title = 'Zone Master',
-        description = 'Catch fish in all zones',
-        requirement = { type = 'zones_visited', amount = 5 },
-        reward = { xp = 0.8, money = 2500 }
-    }
-}
-
 Config.ped = {
     model = `s_m_m_cntrybar_01`,
     buyAccount = 'money',
@@ -426,16 +252,15 @@ Config.ped = {
     }
 }
 
--- Enhanced boat rental system
 Config.renting = {
     model = `s_m_m_dockwork_01`,
     account = 'money',
     boats = {
-        { model = `seashark`, price = 300, image = 'https://i.imgur.com/placeholder1.png', fuel = 80, description = 'Fast and agile' },
-        { model = `speeder`, price = 500, image = 'https://i.imgur.com/placeholder2.png', fuel = 100, description = 'Balanced performance' },
-        { model = `dinghy`, price = 750, image = 'https://i.imgur.com/placeholder3.png', fuel = 120, description = 'Stable and reliable' },
-        { model = `tug`, price = 1250, image = 'https://i.imgur.com/placeholder4.png', fuel = 150, description = 'Heavy duty vessel' },
-        { model = `marquis`, price = 2000, image = 'https://i.imgur.com/placeholder5.png', fuel = 200, description = 'Luxury fishing yacht' },
+        { model = `seashark`, price = 300, image = 'https://i.postimg.cc/mDSqWj4P/164px-Speeder.webp' },
+        { model = `speeder`, price = 500, image = 'https://i.postimg.cc/mDSqWj4P/164px-Speeder.webp' },
+        { model = `dinghy`, price = 750, image = 'https://i.postimg.cc/ZKzjZgj0/164px-Dinghy2.webp'  },
+        { model = `tug`, price = 1250, image = 'https://i.postimg.cc/jq7vpKHG/164px-Tug.webp' },
+        { model = `marquis`, price = 2000, image = 'https://i.postimg.cc/mDSqWj4P/164px-Speeder.webp' },
     },
     blip = {
         name = 'Boat Rental',
@@ -446,62 +271,6 @@ Config.renting = {
     returnDivider = 5,
     returnRadius = 30.0,
     locations = {
-        { coords = vector4(-1434.4818, -1512.2745, 2.1486, 25.8666), spawn = vector4(-1494.4496, -1537.6943, 2.3942, 115.6015) },
-        { coords = vector4(-1603.4, -1115.2, 13.0, 45.0), spawn = vector4(-1620.5, -1095.8, 0.5, 135.0) }, -- New location
-    }
-}
-
--- New: Fishing equipment upgrades
-Config.equipment = {
-    reels = {
-        { name = 'basic_reel', price = 200, minLevel = 1, skillcheckBonus = 0 },
-        { name = 'precision_reel', price = 800, minLevel = 3, skillcheckBonus = 1 },
-        { name = 'master_reel', price = 2000, minLevel = 5, skillcheckBonus = 2 },
-    },
-    lines = {
-        { name = 'nylon_line', price = 50, minLevel = 1, breakResistance = 1.0 },
-        { name = 'fluorocarbon_line', price = 150, minLevel = 2, breakResistance = 1.2 },
-        { name = 'braided_line', price = 300, minLevel = 3, breakResistance = 1.5 },
-    },
-    hooks = {
-        { name = 'basic_hook', price = 10, minLevel = 1, catchBonus = 1.0 },
-        { name = 'sharp_hook', price = 50, minLevel = 2, catchBonus = 1.1 },
-        { name = 'barbed_hook', price = 150, minLevel = 3, catchBonus = 1.2 },
-    }
-}
-
--- New: Weather-based fishing bonuses
-Config.seasons = {
-    spring = { months = {3, 4, 5}, fishBonus = { 'salmon', 'trout', 'mahi_mahi' } },
-    summer = { months = {6, 7, 8}, fishBonus = { 'mahi_mahi', 'red_snapper', 'grouper', 'snook' } },
-    autumn = { months = {9, 10, 11}, fishBonus = { 'salmon', 'haddock', 'cod', 'grouper' } },
-    winter = { months = {12, 1, 2}, fishBonus = { 'haddock', 'cod' } }
-}
-
--- New: Fishing skills/perks system
-Config.skills = {
-    {
-        name = 'patience',
-        maxLevel = 10,
-        description = 'Reduces waiting time between catches',
-        effect = function(level) return 1 - (level * 0.05) end -- 5% reduction per level
-    },
-    {
-        name = 'precision',
-        maxLevel = 10,
-        description = 'Increases success rate of skill checks',
-        effect = function(level) return level * 0.1 end -- 10% bonus per level
-    },
-    {
-        name = 'luck',
-        maxLevel = 10,
-        description = 'Increases rare fish catch chance',
-        effect = function(level) return 1 + (level * 0.05) end -- 5% increase per level
-    },
-    {
-        name = 'strength',
-        maxLevel = 10,
-        description = 'Reduces rod break chance',
-        effect = function(level) return 1 - (level * 0.1) end -- 10% reduction per level
+        { coords = vector4(-1434.4818, -1512.2745, 2.1486, 25.8666), spawn = vector4(-1494.4496, -1537.6943, 2.3942, 115.6015) }
     }
 }

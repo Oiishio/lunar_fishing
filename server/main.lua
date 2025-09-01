@@ -18,43 +18,94 @@ for _, zone in ipairs(Config.fishingZones) do
     end
 end
 
--- New: Get current season based on month
+-- Weather system
+local currentServerWeather = 'CLEAR'
+local weatherChangeTimer = 0
+local weatherDuration = 600000 -- 10 minutes per weather cycle
+
+local weatherCycle = {
+    'CLEAR',
+    'CLOUDY', 
+    'OVERCAST',
+    'RAIN',
+    'CLEARING',
+    'CLEAR',
+    'FOGGY',
+    'CLEAR'
+}
+
+local weatherIndex = 1
+
+-- Enhanced: Get current time period (server-side)
+local function getCurrentTimePeriod()
+    local hour = tonumber(os.date('%H'))
+    
+    for period, data in pairs(Config.timeEffects) do
+        if data.startHour <= data.endHour then
+            if hour >= data.startHour and hour <= data.endHour then
+                return period, data
+            end
+        else
+            if hour >= data.startHour or hour <= data.endHour then
+                return period, data
+            end
+        end
+    end
+    
+    return 'day', { waitMultiplier = 1.0, chanceBonus = 0, message = 'Standard fishing conditions.' }
+end
+
+-- Enhanced: Get current season (server-side)  
 local function getCurrentSeason()
     local month = tonumber(os.date('%m'))
     for season, data in pairs(Config.seasons) do
         for _, seasonMonth in ipairs(data.months) do
             if month == seasonMonth then
-                return season
+                return season, data
             end
         end
     end
-    return 'spring' -- fallback
+    return 'spring', Config.seasons.spring
 end
 
--- New: Get current time period
-local function getCurrentTimePeriod()
-    local hour = tonumber(os.date('%H'))
+-- Enhanced: Calculate environmental effects
+local function calculateEnvironmentalEffects(currentZone)
+    local timePeriod, timeData = getCurrentTimePeriod()
+    local season, seasonData = getCurrentSeason()
+    local weather = currentServerWeather
     
-    if hour >= 5 and hour <= 7 then
-        return 'dawn'
-    elseif hour >= 17 and hour <= 19 then
-        return 'dusk'
-    elseif hour >= 22 or hour <= 4 then
-        return 'night'
-    else
-        return 'day'
+    local effects = {
+        weather = weather,
+        time = timePeriod,
+        season = season,
+        waitMultiplier = 1.0,
+        chanceMultiplier = 1.0,
+        weatherMessage = nil,
+        timeMessage = timeData.message,
+        seasonMessage = seasonData.message
+    }
+    
+    -- Apply weather effects
+    if Config.weatherEffects[weather] then
+        local weatherEffect = Config.weatherEffects[weather]
+        effects.waitMultiplier = effects.waitMultiplier * weatherEffect.waitMultiplier
+        effects.chanceMultiplier = effects.chanceMultiplier * (1 + (weatherEffect.chanceBonus or 0) / 100)
+        effects.weatherMessage = weatherEffect.message
     end
+    
+    -- Apply time effects  
+    if timeData.waitMultiplier then
+        effects.waitMultiplier = effects.waitMultiplier * timeData.waitMultiplier
+    end
+    if timeData.chanceBonus then
+        effects.chanceMultiplier = effects.chanceMultiplier * (1 + timeData.chanceBonus / 100)
+    end
+    
+    return effects
 end
 
--- New: Enhanced fish selection with weather, time, and season effects
----@param fishList string[]
----@param playerLevel integer
----@param zone FishingZone?
-local function getRandomFish(fishList, playerLevel, zone)
-    local currentSeason = getCurrentSeason()
-    local currentTime = getCurrentTimePeriod()
-    local weather = GetCurrentWeatherType()
-    
+-- Enhanced: Weather-aware fish selection
+local function getWeatherAwareFish(fishList, effects, currentZone)
     local availableFish = {}
     local totalWeight = 0
     
@@ -63,28 +114,37 @@ local function getRandomFish(fishList, playerLevel, zone)
         if fish then
             local weight = fish.chance
             
-            -- Apply seasonal modifiers
-            if fish.season and not fish.season[currentSeason] then
-                weight = weight * 0.3 -- Reduce chance for out-of-season fish
+            -- Apply environmental multipliers
+            weight = weight * effects.chanceMultiplier
+            
+            -- Apply zone rarity multipliers if available
+            if currentZone and currentZone.rarityMultiplier and currentZone.rarityMultiplier[fish.rarity] then
+                weight = weight * currentZone.rarityMultiplier[fish.rarity]
             end
             
-            -- Apply time preferences
-            if fish.timePreference and fish.timePreference[currentTime] then
-                weight = weight * 1.5 -- Increase chance during preferred times
+            -- Weather-specific fish bonuses
+            if effects.weather == 'RAIN' or effects.weather == 'THUNDER' then
+                if fish.rarity == 'rare' or fish.rarity == 'epic' then
+                    weight = weight * 1.2
+                end
+            elseif effects.weather == 'CLEAR' then
+                if fish.rarity == 'common' then
+                    weight = weight * 1.1
+                end
             end
             
-            -- Apply weather effects
-            if Config.weatherEffects[weather] then
-                local weatherBonus = Config.weatherEffects[weather].chanceBonus or 0
-                weight = weight * (1 + weatherBonus / 100)
+            -- Seasonal bonuses
+            local season, seasonData = getCurrentSeason()
+            if seasonData.fishBonus then
+                for _, bonusFish in ipairs(seasonData.fishBonus) do
+                    if fishName == bonusFish then
+                        weight = weight * 1.3
+                        break
+                    end
+                end
             end
             
-            -- Apply zone rarity multipliers
-            if zone and zone.rarityMultiplier and zone.rarityMultiplier[fish.rarity] then
-                weight = weight * zone.rarityMultiplier[fish.rarity]
-            end
-            
-            weight = math.max(weight, 1) -- Ensure minimum chance
+            weight = math.max(weight, 0.1)
             
             table.insert(availableFish, { name = fishName, weight = weight })
             totalWeight = totalWeight + weight
@@ -92,7 +152,7 @@ local function getRandomFish(fishList, playerLevel, zone)
     end
     
     if #availableFish == 0 then
-        return 'anchovy' -- Fallback fish
+        return 'anchovy'
     end
     
     local randomValue = math.random() * totalWeight
@@ -105,118 +165,25 @@ local function getRandomFish(fishList, playerLevel, zone)
         end
     end
     
-    return availableFish[1].name -- Fallback
+    return availableFish[1].name
 end
 
--- New: Enhanced bait selection with rarity bonuses
 ---@param player Player
----@return FishingBait?, table<string, number>?
+---@return FishingBait?
 local function getBestBait(player)
-    local bestBait = nil
-    local rarityBonuses = {}
-    
     for i = #Config.baits, 1, -1 do
         local bait = Config.baits[i]
-        
+
         if player:getItemCount(bait.name) > 0 then
-            bestBait = bait
-            rarityBonuses = bait.rarityBonus or {}
-            break
+            return bait
         end
     end
-    
-    return bestBait, rarityBonuses
-end
-
--- New: Check player achievements
----@param player Player
----@param achievementData table
-local function checkAchievements(player, achievementData)
-    local identifier = player:getIdentifier()
-    local playerStats = GetPlayerStats(identifier) -- You'll need to implement this
-    
-    for _, achievement in ipairs(Config.achievements) do
-        if not playerStats.achievements[achievement.id] then
-            local completed = false
-            
-            if achievement.requirement.type == 'total_caught' then
-                completed = playerStats.totalCaught >= achievement.requirement.amount
-            elseif achievement.requirement.type == 'rarity_caught' then
-                local count = playerStats.rarityCounts[achievement.requirement.rarity] or 0
-                completed = count >= achievement.requirement.amount
-            elseif achievement.requirement.type == 'zones_visited' then
-                completed = Utils.getTableSize(playerStats.zonesVisited) >= achievement.requirement.amount
-            end
-            
-            if completed then
-                -- Award achievement
-                playerStats.achievements[achievement.id] = true
-                
-                if achievement.reward.xp then
-                    AddPlayerLevel(player, achievement.reward.xp)
-                end
-                
-                if achievement.reward.money then
-                    player:addAccountMoney('money', achievement.reward.money)
-                end
-                
-                if achievement.reward.items then
-                    for itemName, amount in pairs(achievement.reward.items) do
-                        player:addItem(itemName, amount)
-                    end
-                end
-                
-                TriggerClientEvent('lunar_fishing:showNotification', player.source, 
-                    ('Achievement Unlocked: %s'):format(achievement.title), 'success')
-            end
-        end
-    end
-end
-
--- New: Enhanced rod durability system
-local rodDurability = {} -- Store rod durability per player
-
----@param player Player
----@param rodName string
-local function checkRodDurability(player, rodName)
-    local identifier = player:getIdentifier()
-    
-    if not rodDurability[identifier] then
-        rodDurability[identifier] = {}
-    end
-    
-    if not rodDurability[identifier][rodName] then
-        -- Find rod config for durability
-        for _, rod in ipairs(Config.fishingRods) do
-            if rod.name == rodName then
-                rodDurability[identifier][rodName] = rod.durability
-                break
-            end
-        end
-    end
-    
-    rodDurability[identifier][rodName] = rodDurability[identifier][rodName] - 1
-    
-    if rodDurability[identifier][rodName] <= 0 then
-        player:removeItem(rodName, 1)
-        rodDurability[identifier][rodName] = nil
-        TriggerClientEvent('lunar_fishing:showNotification', player.source, locale('rod_broke'), 'error')
-        return false
-    end
-    
-    -- Warn player when rod is getting low on durability
-    if rodDurability[identifier][rodName] <= 10 then
-        TriggerClientEvent('lunar_fishing:showNotification', player.source, 
-            ('Your rod is wearing out! Durability: %d'):format(rodDurability[identifier][rodName]), 'warn')
-    end
-    
-    return true
 end
 
 ---@type table<integer, boolean>
 local busy = {}
 
--- Enhanced fishing rod usage with new features
+-- Enhanced fishing rod usage with weather system
 for _, rod in ipairs(Config.fishingRods) do
     Framework.registerUsableItem(rod.name, function(source)
         local player = Framework.getPlayerFromId(source)
@@ -244,9 +211,8 @@ for _, rod in ipairs(Config.fishingRods) do
             end
         end
 
-        local zone = currentZone and Config.fishingZones[currentZone.index] or nil
-        local fishList = zone and zone.fishList or Config.outside.fishList
-        local bait, rarityBonuses = getBestBait(player)
+        local fishList = currentZone and Config.fishingZones[currentZone.index].fishList or Config.outside.fishList
+        local bait = getBestBait(player)
 
         if not bait then
             TriggerClientEvent('lunar_fishing:showNotification', source, locale('no_bait'), 'error')
@@ -254,46 +220,210 @@ for _, rod in ipairs(Config.fishingRods) do
             return
         end
         
-        -- Enhanced fish selection with new system
-        local fishName = getRandomFish(fishList, GetPlayerLevel(player), zone)
-        local fish = Config.fish[fishName]
+        -- Enhanced: Use weather-aware fish selection
+        local environmentalEffects = calculateEnvironmentalEffects(currentZone and Config.fishingZones[currentZone.index] or nil)
+        local fishName = getWeatherAwareFish(fishList, environmentalEffects, currentZone and Config.fishingZones[currentZone.index] or nil)
 
         if not player:canCarryItem(fishName, 1) then
-            TriggerClientEvent('lunar_fishing:showNotification', source, locale('inventory_full'), 'error')
+            TriggerClientEvent('lunar_fishing:showNotification', source, 'Inventory full!', 'error')
             busy[source] = nil
             return
         end
             
         player:removeItem(bait.name, 1)
         
-        -- Apply weather effects to wait time
-        local waitTimeMultiplier = 1.0
-        local weather = GetCurrentWeatherType()
-        if Config.weatherEffects[weather] then
-            waitTimeMultiplier = Config.weatherEffects[weather].waitMultiplier
-        end
-        
-        -- Apply time effects
-        local currentTime = getCurrentTimePeriod()
-        if Config.timeEffects[currentTime] then
-            waitTimeMultiplier = waitTimeMultiplier * Config.timeEffects[currentTime].waitMultiplier
-        end
-        
-        -- Apply rod catch bonus to fish skillcheck
-        local enhancedFish = table.clone(fish)
-        if rod.catchBonus > 1.0 then
-            -- Make skillcheck slightly easier with better rods
-            local skillcheckCopy = table.clone(fish.skillcheck)
-            if #skillcheckCopy > 1 and math.random() < (rod.catchBonus - 1.0) then
-                table.remove(skillcheckCopy) -- Remove one difficulty level
-            end
-            enhancedFish.skillcheck = skillcheckCopy
-        end
-        
-        local success = lib.callback.await('lunar_fishing:itemUsed', source, bait, enhancedFish, waitTimeMultiplier)
+        local success = lib.callback.await('lunar_fishing:itemUsed', source, bait, Config.fish[fishName], environmentalEffects)
 
         if success then
-            -- Calculate dynamic price
-            local price = type(fish.price) == 'number' and fish.price or math.random(fish.price.min, fish.price.max)
+            player:addItem(fishName, 1)
+            AddPlayerLevel(player, Config.progressPerCatch)
             
-            player:ad
+            -- Calculate fish value for notifications
+            local fish = Config.fish[fishName]
+            local fishValue = type(fish.price) == 'number' and fish.price or math.random(fish.price.min, fish.price.max)
+            
+            -- Enhanced notification based on rarity
+            local rarityEmojis = {
+                common = '🐟',
+                uncommon = '🐠', 
+                rare = '🌟',
+                epic = '💎',
+                legendary = '👑',
+                mythical = '🔮'
+            }
+            
+            local emoji = rarityEmojis[fish.rarity] or '🐟'
+            local message = ('%s Caught a %s %s! ($%d)'):format(
+                emoji,
+                fish.rarity:upper(),
+                Utils.getItemLabel(fishName),
+                fishValue
+            )
+            
+            TriggerClientEvent('lunar_fishing:showNotification', source, message, 'success')
+            TriggerClientEvent('lunar_fishing:fishCaught', source, fishName, fish.rarity, fishValue)
+            
+            Utils.logToDiscord(source, player, ('Caught a %s %s (Rarity: %s, Weather: %s)'):format(
+                Utils.getItemLabel(fishName),
+                fish.rarity,
+                currentZone and Config.fishingZones[currentZone.index].blip.name or 'Open Waters',
+                currentServerWeather
+            ))
+            
+        elseif math.random(100) <= rod.breakChance then
+            player:removeItem(rod.name, 1)
+            TriggerClientEvent('lunar_fishing:showNotification', source, locale('rod_broke'), 'error')
+        end
+
+        busy[source] = nil
+    end)
+end
+
+-- Initialize weather system
+CreateThread(function()
+    Wait(5000) -- Wait for server to load
+    
+    -- Set initial weather
+    currentServerWeather = 'CLEAR'
+    TriggerClientEvent('lunar_fishing:weatherChanged', -1, currentServerWeather)
+    
+    -- Weather cycle loop
+    while true do
+        Wait(weatherDuration)
+        
+        -- Advance to next weather in cycle
+        weatherIndex = weatherIndex + 1
+        if weatherIndex > #weatherCycle then
+            weatherIndex = 1
+        end
+        
+        local newWeather = weatherCycle[weatherIndex]
+        
+        -- Small chance for special weather
+        if math.random(100) <= 15 then -- 15% chance
+            local specialWeathers = { 'THUNDER', 'SNOW', 'BLIZZARD' }
+            newWeather = specialWeathers[math.random(#specialWeathers)]
+        end
+        
+        currentServerWeather = newWeather
+        
+        -- Notify all players of weather change
+        TriggerClientEvent('lunar_fishing:weatherChanged', -1, newWeather)
+        
+        -- Announce weather changes
+        local weatherEffect = Config.weatherEffects[newWeather]
+        if weatherEffect and weatherEffect.message then
+            TriggerClientEvent('lunar_fishing:showNotification', -1, '🌤️ ' .. weatherEffect.message, 'inform')
+        end
+        
+        print(('[FISHING] Weather changed to: %s'):format(newWeather))
+    end
+end)
+
+-- Weather system callbacks
+lib.callback.register('lunar_fishing:getCurrentWeather', function(source)
+    return currentServerWeather
+end)
+
+lib.callback.register('lunar_fishing:getEnvironmentalEffects', function(source)
+    return calculateEnvironmentalEffects(nil)
+end)
+
+-- Admin weather control
+RegisterNetEvent('lunar_fishing:setWeather', function(weather)
+    local source = source
+    local player = Framework.getPlayerFromId(source)
+    
+    if not player then return end
+    
+    -- Check admin permissions (adjust based on your system)
+    local hasPermission = true -- For testing - implement proper permission check
+    
+    if not hasPermission then
+        TriggerClientEvent('lunar_fishing:showNotification', source, 'No permission', 'error')
+        return
+    end
+    
+    currentServerWeather = weather
+    TriggerClientEvent('lunar_fishing:weatherChanged', -1, weather)
+    TriggerClientEvent('lunar_fishing:showNotification', source, ('Weather set to: %s'):format(weather), 'success')
+    
+    print(('[FISHING] Admin %s changed weather to: %s'):format(GetPlayerName(source), weather))
+end)
+
+-- Weather info request
+RegisterNetEvent('lunar_fishing:requestWeatherInfo', function()
+    local source = source
+    local effects = calculateEnvironmentalEffects(nil)
+    
+    TriggerClientEvent('lunar_fishing:weatherInfo', source, effects)
+end)
+
+-- Simple contract system
+local activeContracts = {}
+
+-- Register the callback that was missing
+lib.callback.register('lunar_fishing:getActiveContracts', function(source)
+    return activeContracts
+end)
+
+-- Register tournament info callback  
+lib.callback.register('lunar_fishing:getTournamentInfo', function(source)
+    return nil -- No tournament system for now
+end)
+
+-- Simple contract generation
+local function generateSimpleContracts()
+    activeContracts = {
+        {
+            id = 'contract_1',
+            title = 'Catch 5 Fish',
+            description = 'Catch any 5 fish for a bonus reward.',
+            type = 'catch_any',
+            target = { amount = 5 },
+            reward = { money = 500, xp = 0.1 }
+        },
+        {
+            id = 'contract_2', 
+            title = 'Catch Valuable Fish',
+            description = 'Catch fish worth at least $1000 total.',
+            type = 'catch_value',
+            target = { value = 1000 },
+            reward = { money = 800, xp = 0.15 }
+        },
+        {
+            id = 'contract_3',
+            title = 'Rare Fish Hunter',
+            description = 'Catch 3 rare or better fish.',
+            type = 'catch_rarity',
+            target = { rarity = 'rare', amount = 3 },
+            reward = { money = 1200, xp = 0.2 }
+        }
+    }
+end
+
+-- Initialize contracts
+CreateThread(function()
+    Wait(5000)
+    generateSimpleContracts()
+    
+    -- Refresh contracts every hour
+    SetInterval(function()
+        generateSimpleContracts()
+        TriggerClientEvent('lunar_fishing:contractsRefreshed', -1, activeContracts)
+    end, 3600000)
+end)
+
+-- Export functions for other resources
+exports('getCurrentWeather', function()
+    return currentServerWeather
+end)
+
+exports('setWeather', function(weather)
+    currentServerWeather = weather
+    TriggerClientEvent('lunar_fishing:weatherChanged', -1, weather)
+end)
+
+exports('getWeatherEffects', function()
+    return Config.weatherEffects[currentServerWeather]
+end)

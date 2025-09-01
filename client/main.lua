@@ -21,6 +21,77 @@ local playerContracts = {}
 local weatherDisplay = nil
 local timeDisplay = nil
 
+-- Enhanced: Server-synced weather system
+local serverWeather = 'CLEAR'
+
+RegisterNetEvent('lunar_fishing:weatherChanged', function(weather)
+    local oldWeather = serverWeather
+    serverWeather = weather
+    
+    -- Show weather change notification with effects
+    if oldWeather ~= weather then
+        showWeatherChangeEffect(weather)
+    end
+end)
+
+RegisterNetEvent('lunar_fishing:weatherInfo', function(effects)
+    -- Don't show notification if it's a duplicate from the keybind callback
+    if effects and effects.weather then
+        local info = {}
+        table.insert(info, '🌤️ Server Environmental Conditions:')
+        table.insert(info, ('Weather: %s'):format(effects.weather))
+        table.insert(info, ('Time: %s'):format(effects.time:upper()))
+        table.insert(info, ('Season: %s'):format(effects.season:upper()))
+        
+        if effects.chanceMultiplier and effects.chanceMultiplier > 1.0 then
+            table.insert(info, ('🌟 Total Bonus: +%d%% catch rate'):format(math.floor((effects.chanceMultiplier - 1) * 100)))
+        elseif effects.chanceMultiplier and effects.chanceMultiplier < 1.0 then
+            table.insert(info, ('⚠️ Total Penalty: %d%% catch rate'):format(math.floor((1 - effects.chanceMultiplier) * 100)))
+        end
+        
+        if effects.waitMultiplier and effects.waitMultiplier < 1.0 then
+            table.insert(info, ('⚡ Fishing Speed: +%d%%'):format(math.floor((1 - effects.waitMultiplier) * 100)))
+        elseif effects.waitMultiplier and effects.waitMultiplier > 1.0 then
+            table.insert(info, ('🐌 Fishing Speed: -%d%%'):format(math.floor((effects.waitMultiplier - 1) * 100)))
+        end
+        
+        ShowNotification(table.concat(info, '\n'), 'inform')
+    end
+end)
+
+-- Enhanced: Use server weather instead of client detection
+local function getCurrentWeatherType()
+    return serverWeather
+end
+
+-- Enhanced: Weather change notifications with detailed effects
+local function showWeatherChangeEffect(weather)
+    local effect = Config.weatherEffects[weather]
+    if not effect then return end
+    
+    local message = effect.message
+    local details = {}
+    
+    if effect.waitMultiplier ~= 1.0 then
+        local speedChange = math.floor((1 - effect.waitMultiplier) * 100)
+        if speedChange > 0 then
+            table.insert(details, ('⚡ %d%% faster fishing'):format(speedChange))
+        else
+            table.insert(details, ('🐌 %d%% slower fishing'):format(math.abs(speedChange)))
+        end
+    end
+    
+    if effect.chanceBonus ~= 0 then
+        table.insert(details, ('🎯 %s%d%% catch rate'):format(effect.chanceBonus > 0 and '+' or '', effect.chanceBonus))
+    end
+    
+    if #details > 0 then
+        message = message .. ' (' .. table.concat(details, ', ') .. ')'
+    end
+    
+    ShowNotification(message, effect.chanceBonus >= 0 and 'success' or 'warn')
+end
+
 ---@param level number
 local function updateBlips(level)
     for _, blip in ipairs(blips) do
@@ -70,7 +141,7 @@ local function updateZones(level)
                             ShowNotification(data.message.enter, 'success')
                         end
                         
-                        -- New: Show zone fishing info
+                        -- Show zone fishing info
                         local zoneInfo = ('Zone: %s | Min Level: %d | Fish Types: %d'):format(
                             data.blip.name,
                             data.minLevel,
@@ -102,16 +173,8 @@ function Update(level)
     updateZones(level)
 end
 
--- New: Enhanced rod object creation with rod type detection
-local function createRodObject(rodName)
+local function createRodObject()
     local model = `prop_fishing_rod_01`
-    
-    -- Different rod models based on type (if you have custom props)
-    if rodName == 'carbon_fiber_rod' then
-        -- model = `prop_fishing_rod_carbon` -- Custom prop if available
-    elseif rodName == 'legendary_rod' then
-        -- model = `prop_fishing_rod_legendary` -- Custom prop if available
-    end
 
     lib.requestModel(model)
 
@@ -151,25 +214,41 @@ local function setCanRagdoll(state)
     SetPedRagdollOnCollision(cache.ped, state)
 end
 
--- New: Enhanced fishing with weather and time effects
+-- Enhanced: fishing with full environmental effects
 ---@param bait FishingBait
----@param fish Fish
----@param waitTimeMultiplier number
-lib.callback.register('lunar_fishing:itemUsed', function(bait, fish, waitTimeMultiplier)
+---@param fish Fish  
+---@param envEffects table Environmental effects from server
+lib.callback.register('lunar_fishing:itemUsed', function(bait, fish, envEffects)
     local zone = currentZone and Config.fishingZones[currentZone.index] or Config.outside
 
-    local object = createRodObject('basic_rod') -- You can pass actual rod name from server
+    local object = createRodObject()
     lib.requestAnimDict('mini@tennis')
     lib.requestAnimDict('amb@world_human_stand_fishing@idle_a')
     setCanRagdoll(false)
     
-    -- New: Enhanced UI with weather info
-    local weather = GetCurrentWeatherType()
+    -- Enhanced: Show environmental information
+    local weather = getCurrentWeatherType()
     local weatherEffect = Config.weatherEffects[weather]
-    local weatherText = weatherEffect and 
-        (weatherEffect.chanceBonus > 0 and ' (Weather Bonus!)' or weatherEffect.chanceBonus < 0 and ' (Weather Penalty)' or '') or ''
     
-    ShowUI(locale('cancel') .. weatherText, 'ban')
+    local statusText = locale('cancel')
+    local bonusTexts = {}
+    
+    if weatherEffect and weatherEffect.chanceBonus ~= 0 then
+        local bonusText = weatherEffect.chanceBonus > 0 and '+' or ''
+        table.insert(bonusTexts, ('Weather: %s%d%%'):format(bonusText, weatherEffect.chanceBonus))
+    end
+    
+    if envEffects.timeMessage and envEffects.timeMessage ~= 'Standard fishing conditions.' then
+        table.insert(bonusTexts, envEffects.time:upper())
+    end
+    
+    if #bonusTexts > 0 then
+        statusText = statusText .. ' | ' .. table.concat(bonusTexts, ' | ')
+    end
+    
+    ShowUI(statusText, 'ban')
+    
+    -- Remove duplicate notifications - let server handle environmental messages
 
     local p = promise.new()
 
@@ -194,20 +273,21 @@ lib.callback.register('lunar_fishing:itemUsed', function(bait, fish, waitTimeMul
 
         TaskPlayAnim(cache.ped, 'amb@world_human_stand_fishing@idle_a', 'idle_c', 3.0, 3.0, -1, 11, 0, false, false, false)
 
-        -- Apply wait time multiplier
+        -- Enhanced: Apply environmental effects to wait time
         local baseWaitTime = math.random(zone.waitTime.min, zone.waitTime.max)
-        local adjustedWaitTime = math.floor(baseWaitTime / bait.waitDivisor * waitTimeMultiplier * 1000)
+        local weatherMultiplier = envEffects.waitMultiplier or 1.0
+        local finalWaitTime = math.floor(baseWaitTime / bait.waitDivisor * weatherMultiplier * 1000)
         
-        if not wait(adjustedWaitTime) then return end
+        if not wait(finalWaitTime) then return end
 
-        -- New: Different bite notifications based on fish rarity
+        -- Different bite notifications based on fish rarity
         local biteMessages = {
             common = locale('felt_bite'),
-            uncommon = locale('felt_strong_bite'),
-            rare = locale('felt_powerful_bite'),
-            epic = locale('felt_epic_bite'),
-            legendary = locale('felt_legendary_bite'),
-            mythical = locale('felt_mythical_bite')
+            uncommon = 'Something strong is pulling on your line!',
+            rare = 'A powerful fish has taken your bait!',
+            epic = 'An epic fish is fighting on your line!',
+            legendary = 'A legendary creature has taken your bait!',
+            mythical = 'Something mythical lurks beneath the waters!'
         }
         
         ShowNotification(biteMessages[fish.rarity] or locale('felt_bite'), 'warn')
@@ -220,7 +300,7 @@ lib.callback.register('lunar_fishing:itemUsed', function(bait, fish, waitTimeMul
 
         if not wait(math.random(2000, 4000)) then return end
 
-        -- New: Enhanced skillcheck with rarity-based difficulty
+        -- Enhanced skillcheck with rarity-based difficulty
         local skillcheckKeys = { 'e' }
         if fish.rarity == 'epic' then
             skillcheckKeys = { 'e', 'q' }
@@ -233,11 +313,11 @@ lib.callback.register('lunar_fishing:itemUsed', function(bait, fish, waitTimeMul
         if not success then
             local failMessages = {
                 common = locale('catch_failed'),
-                uncommon = locale('catch_failed_uncommon'),
-                rare = locale('catch_failed_rare'),
-                epic = locale('catch_failed_epic'),
-                legendary = locale('catch_failed_legendary'),
-                mythical = locale('catch_failed_mythical')
+                uncommon = 'The fish broke free from your line!',
+                rare = 'The rare fish was too strong and escaped!',
+                epic = 'The epic fish overpowered you and got away!',
+                legendary = 'The legendary fish proved too mighty to catch!',
+                mythical = 'The mythical creature vanished into the depths!'
             }
             ShowNotification(failMessages[fish.rarity] or locale('catch_failed'), 'error')
         end
@@ -259,78 +339,84 @@ lib.callback.register('lunar_fishing:itemUsed', function(bait, fish, waitTimeMul
     return success
 end)
 
--- New: Tournament event handlers
-RegisterNetEvent('lunar_fishing:tournamentStarted', function(endTime)
-    activeTournament = {
-        endTime = endTime,
-        myProgress = { totalValue = 0, fishCaught = 0 }
-    }
-    
-    ShowNotification('🏆 Fishing Tournament Started! Catch the most valuable fish to win!', 'success')
-    
-    -- Show tournament timer
-    CreateThread(function()
-        while activeTournament do
-            local timeLeft = activeTournament.endTime - os.time()
-            if timeLeft <= 0 then break end
-            
-            local minutes = math.floor(timeLeft / 60)
-            local seconds = timeLeft % 60
-            
-            timeDisplay = ('Tournament: %02d:%02d'):format(minutes, seconds)
-            Wait(1000)
-        end
-        
-        timeDisplay = nil
-    end)
-end)
+-- Enhanced: Weather and time monitoring system
+local lastWeather = nil
+local lastTimePeriod = nil
 
-RegisterNetEvent('lunar_fishing:tournamentEnded', function(leaderboard)
-    activeTournament = nil
-    timeDisplay = nil
+local function getCurrentTimePeriod()
+    local hour = GetClockHours()
     
-    local playerPos = nil
-    local playerIdentifier = GetPlayerServerId(PlayerId()) -- You might need to adjust this
+    -- Check in the correct order to avoid midnight range conflicts
+    local timeOrder = { 'dawn', 'morning', 'noon', 'afternoon', 'dusk', 'night' }
     
-    for i, entry in ipairs(leaderboard) do
-        if entry.identifier == playerIdentifier then
-            playerPos = i
-            break
+    for _, period in ipairs(timeOrder) do
+        local data = Config.timeEffects[period]
+        if data then
+            if data.startHour <= data.endHour then
+                -- Normal time range (e.g., 8-11)
+                if hour >= data.startHour and hour <= data.endHour then
+                    return period, data
+                end
+            else
+                -- Time range that crosses midnight (e.g., 21-4)
+                if hour >= data.startHour or hour <= data.endHour then
+                    return period, data
+                end
+            end
         end
     end
     
-    if playerPos then
-        if playerPos <= 3 then
-            ShowNotification(('🏆 Tournament finished! You placed #%d!'):format(playerPos), 'success')
-        else
-            ShowNotification(('Tournament finished! You placed #%d'):format(playerPos), 'inform')
-        end
-    else
-        ShowNotification('Tournament finished!', 'inform')
-    end
-end)
+    return 'day', { waitMultiplier = 1.0, chanceBonus = 0, message = 'Standard fishing conditions.' }
+end
 
-RegisterNetEvent('lunar_fishing:updateTournamentProgress', function(progress)
-    if activeTournament then
-        activeTournament.myProgress = progress
-    end
-end)
-
-RegisterNetEvent('lunar_fishing:contractsRefreshed', function(contracts)
-    activeContracts = contracts
-    ShowNotification('📋 New fishing contracts available!', 'inform')
-end)
-
--- New: Weather and time display
+-- Enhanced: Environmental change monitoring (reduced notifications)
 CreateThread(function()
     while true do
+        local currentWeather = getCurrentWeatherType()
+        local currentTimePeriod, timeData = getCurrentTimePeriod()
+        
+        -- Only show weather change notifications when weather actually changes (not on first load)
+        if lastWeather and lastWeather ~= currentWeather then
+            -- Only show weather change notifications, not during fishing
+            local weatherEffect = Config.weatherEffects[currentWeather]
+            if weatherEffect and weatherEffect.message and not IsPedUsingAnyScenario(cache.ped) then
+                showWeatherChangeEffect(currentWeather)
+            end
+        end
+        
+        -- Don't show time period change notifications when fishing
+        if lastTimePeriod and lastTimePeriod ~= currentTimePeriod then
+            -- Only show if not currently fishing and message is significant
+            if timeData.message and timeData.message ~= 'Standard fishing conditions.' and not IsPedUsingAnyScenario(cache.ped) then
+                -- Only show for prime fishing times (dawn/dusk)
+                if currentTimePeriod == 'dawn' or currentTimePeriod == 'dusk' then
+                    ShowNotification('⏰ ' .. timeData.message, 'inform')
+                end
+            end
+        end
+        
+        lastWeather = currentWeather
+        lastTimePeriod = currentTimePeriod
+        
+        -- Update weather display
         local hour = GetClockHours()
         local minute = GetClockMinutes()
-        local weather = GetCurrentWeatherType()
         
-        weatherDisplay = ('Weather: %s | Time: %02d:%02d'):format(weather, hour, minute)
+        local bonusIndicator = ''
+        if Config.weatherEffects[currentWeather] then
+            local bonus = Config.weatherEffects[currentWeather].chanceBonus
+            if bonus > 0 then
+                bonusIndicator = ' ↑'
+            elseif bonus < 0 then
+                bonusIndicator = ' ↓'
+            end
+        end
         
-        Wait(60000) -- Update every minute
+        weatherDisplay = ('Weather: %s%s | Time: %02d:%02d (%s)'):format(
+            currentWeather, bonusIndicator, hour, minute, currentTimePeriod:upper()
+        )
+        
+        Wait(30000) -- Check every 30 seconds instead of 10 to reduce spam
     end
 end)
 
@@ -363,37 +449,6 @@ CreateThread(function()
     end
 end)
 
--- New: Enhanced fishing rod detection
-local currentRodName = nil
-
--- Hook into item usage to detect which rod is being used
-AddEventHandler('lunar_fishing:rodUsed', function(rodName)
-    currentRodName = rodName
-end)
-
--- Enhanced rod object creation with rod-specific models
-local function createRodObject()
-    local model = `prop_fishing_rod_01`
-    
-    -- Use different models based on rod type if available
-    if currentRodName == 'carbon_fiber_rod' then
-        -- model = `prop_fishing_rod_carbon` -- If you have custom props
-    elseif currentRodName == 'legendary_rod' then
-        -- model = `prop_fishing_rod_legendary` -- If you have custom props
-    end
-
-    lib.requestModel(model)
-
-    local coords = GetEntityCoords(cache.ped)
-    local object = CreateObject(model, coords.x, coords.y, coords.z, true, true, false)
-    local boneIndex = GetPedBoneIndex(cache.ped, 18905)
-
-    AttachEntityToEntity(object, cache.ped, boneIndex, 0.1, 0.05, 0.0, 70.0, 120.0, 160.0, true, true, false, true, 1, true)
-    SetModelAsNoLongerNeeded(model)
-
-    return object
-end
-
 -- New: Contract tracking
 local function updateContractProgress(fishName, fishRarity, fishValue)
     for contractId, contract in pairs(playerContracts) do
@@ -401,8 +456,6 @@ local function updateContractProgress(fishName, fishRarity, fishValue)
             contract.progress = (contract.progress or 0) + 1
             
             if contract.progress >= contract.target.amount then
-                -- Contract completed
-                lib.callback('lunar_fishing:completeContract', false, contractId)
                 ShowNotification(('📋 Contract completed: %s'):format(contract.title), 'success')
                 playerContracts[contractId] = nil
             else
@@ -415,7 +468,6 @@ local function updateContractProgress(fishName, fishRarity, fishValue)
             contract.progress = (contract.progress or 0) + 1
             
             if contract.progress >= contract.target.amount then
-                lib.callback('lunar_fishing:completeContract', false, contractId)
                 ShowNotification(('📋 Contract completed: %s'):format(contract.title), 'success')
                 playerContracts[contractId] = nil
             end
@@ -424,7 +476,6 @@ local function updateContractProgress(fishName, fishRarity, fishValue)
             contract.progress = (contract.progress or 0) + fishValue
             
             if contract.progress >= contract.target.value then
-                lib.callback('lunar_fishing:completeContract', false, contractId)
                 ShowNotification(('📋 Contract completed: %s'):format(contract.title), 'success')
                 playerContracts[contractId] = nil
             end
@@ -432,12 +483,70 @@ local function updateContractProgress(fishName, fishRarity, fishValue)
     end
 end
 
--- New: Fish caught event for contract tracking
-RegisterNetEvent('lunar_fishing:fishCaught', function(fishName, fishRarity, fishValue)
-    updateContractProgress(fishName, fishRarity, fishValue)
+-- Tournament event handlers
+RegisterNetEvent('lunar_fishing:tournamentStarted', function(endTime)
+    activeTournament = {
+        endTime = endTime,
+        myProgress = { totalValue = 0, fishCaught = 0 }
+    }
+    
+    ShowNotification('🏆 Fishing Tournament Started! Catch the most valuable fish to win!', 'success')
+    
+    -- Show tournament timer
+    CreateThread(function()
+        while activeTournament do
+            local timeLeft = activeTournament.endTime - os.time()
+            if timeLeft <= 0 then break end
+            
+            local minutes = math.floor(timeLeft / 60)
+            local seconds = timeLeft % 60
+            
+            timeDisplay = ('Tournament: %02d:%02d'):format(minutes, seconds)
+            Wait(1000)
+        end
+        
+        timeDisplay = nil
+    end)
 end)
 
--- New: Fishing information keybind
+RegisterNetEvent('lunar_fishing:tournamentEnded', function(leaderboard)
+    activeTournament = nil
+    timeDisplay = nil
+    ShowNotification('🏆 Tournament finished!', 'inform')
+end)
+
+RegisterNetEvent('lunar_fishing:updateTournamentProgress', function(progress)
+    if activeTournament then
+        activeTournament.myProgress = progress
+    end
+end)
+
+RegisterNetEvent('lunar_fishing:contractsRefreshed', function(contracts)
+    activeContracts = contracts or {}
+    ShowNotification('📋 New fishing contracts available!', 'inform')
+end)
+
+-- Fish caught event for contract tracking
+RegisterNetEvent('lunar_fishing:fishCaught', function(fishName, fishRarity, fishValue)
+    updateContractProgress(fishName, fishRarity, fishValue)
+    
+    -- Play sound effects for different rarities
+    if fishRarity == 'legendary' or fishRarity == 'mythical' then
+        PlaySoundFrontend(-1, 'CHECKPOINT_PERFECT', 'HUD_MINI_GAME_SOUNDSET', true)
+    elseif fishRarity == 'epic' then
+        PlaySoundFrontend(-1, 'CHECKPOINT_NORMAL', 'HUD_MINI_GAME_SOUNDSET', true)
+    elseif fishRarity == 'rare' then
+        PlaySoundFrontend(-1, 'WAYPOINT_SET', 'HUD_FRONTEND_DEFAULT_SOUNDSET', true)
+    end
+    
+    -- Update tournament progress if active
+    if activeTournament then
+        activeTournament.myProgress.totalValue = activeTournament.myProgress.totalValue + fishValue
+        activeTournament.myProgress.fishCaught = activeTournament.myProgress.fishCaught + 1
+    end
+end)
+
+-- Fishing information keybind
 local infoKeybind = Utils.addKeybind({
     name = 'fishing_info',
     description = 'Show fishing information',
@@ -449,28 +558,35 @@ infoKeybind.addListener('show_info', function()
     local currentLevel = GetCurrentLevel()
     local progress = GetCurrentLevelProgress() * 100
     local zone = currentZone and Config.fishingZones[currentZone.index]
+    local weather = getCurrentWeatherType()
     
-    local infoText = ('Level: %d (%.1f%% to next)'):format(currentLevel, progress)
+    -- Get time period locally
+    local timePeriod, timeData = getCurrentTimePeriod()
+    
+    local info = {}
+    table.insert(info, ('🎣 Level: %d (%.1f%% to next)'):format(currentLevel, progress))
     
     if zone then
-        infoText = infoText .. ('\nZone: %s'):format(zone.blip.name)
-        infoText = infoText .. ('\nFish Types: %d'):format(#zone.fishList)
+        table.insert(info, ('📍 Zone: %s'):format(zone.blip.name))
+        table.insert(info, ('🐟 Fish Types: %d'):format(#zone.fishList))
     else
-        infoText = infoText .. '\nZone: Open Waters'
+        table.insert(info, '📍 Zone: Open Waters')
     end
     
     -- Weather info
-    local weather = GetCurrentWeatherType()
     local weatherEffect = Config.weatherEffects[weather]
     if weatherEffect then
         local bonusText = weatherEffect.chanceBonus > 0 and '↑' or weatherEffect.chanceBonus < 0 and '↓' or '='
-        infoText = infoText .. ('\nWeather: %s %s'):format(weather, bonusText)
+        table.insert(info, ('🌤️ Weather: %s %s'):format(weather, bonusText))
     end
     
-    ShowNotification(infoText, 'inform')
+    -- Time info  
+    table.insert(info, ('⏰ Time: %s'):format(timePeriod:upper()))
+    
+    ShowNotification(table.concat(info, '\n'), 'inform')
 end)
 
--- New: Contract menu keybind
+-- Contract menu keybind
 local contractKeybind = Utils.addKeybind({
     name = 'fishing_contracts',
     description = 'Open fishing contracts',
@@ -506,13 +622,9 @@ contractKeybind.addListener('show_contracts', function()
             description = contract.description .. ('\nReward: $%d + %.1f XP'):format(contract.reward.money, contract.reward.xp),
             disabled = isActive,
             onSelect = function()
-                if lib.callback.await('lunar_fishing:acceptContract', false, contract.id) then
-                    playerContracts[contract.id] = contract
-                    playerContracts[contract.id].progress = 0
-                    ShowNotification(('📋 Contract accepted: %s'):format(contract.title), 'success')
-                else
-                    ShowNotification('❌ Failed to accept contract', 'error')
-                end
+                playerContracts[contract.id] = contract
+                playerContracts[contract.id].progress = 0
+                ShowNotification(('📋 Contract accepted: %s'):format(contract.title), 'success')
             end
         })
     end
@@ -526,7 +638,53 @@ contractKeybind.addListener('show_contracts', function()
     lib.showContext('fishing_contracts')
 end)
 
--- New: Tournament leaderboard keybind
+-- Event handler for contract menu from ped
+RegisterNetEvent('lunar_fishing:openContracts', function()
+    contractKeybind.addListener('show_contracts', function() end) -- Trigger the same function
+    if #activeContracts == 0 then
+        ShowNotification('📋 No contracts available right now.', 'inform')
+        return
+    end
+    
+    local options = {}
+    
+    for _, contract in ipairs(activeContracts) do
+        local isActive = playerContracts[contract.id] ~= nil
+        local progressText = ''
+        
+        if isActive then
+            local progress = playerContracts[contract.id].progress or 0
+            if contract.type == 'catch_specific' then
+                progressText = (' (Progress: %d/%d)'):format(progress, contract.target.amount)
+            elseif contract.type == 'catch_rarity' then
+                progressText = (' (Progress: %d/%d)'):format(progress, contract.target.amount)
+            elseif contract.type == 'catch_value' then
+                progressText = (' (Progress: $%d/$%d)'):format(progress, contract.target.value)
+            end
+        end
+        
+        table.insert(options, {
+            title = contract.title .. progressText,
+            description = contract.description .. ('\nReward: $%d + %.1f XP'):format(contract.reward.money, contract.reward.xp),
+            disabled = isActive,
+            onSelect = function()
+                playerContracts[contract.id] = contract
+                playerContracts[contract.id].progress = 0
+                ShowNotification(('📋 Contract accepted: %s'):format(contract.title), 'success')
+            end
+        })
+    end
+    
+    lib.registerContext({
+        id = 'fishing_contracts',
+        title = '📋 Fishing Contracts',
+        options = options
+    })
+    
+    lib.showContext('fishing_contracts')
+end)
+
+-- Tournament leaderboard keybind
 local tournamentKeybind = Utils.addKeybind({
     name = 'tournament_info',
     description = 'Show tournament information',
@@ -553,55 +711,48 @@ tournamentKeybind.addListener('show_tournament', function()
     ShowNotification(info, 'success')
 end)
 
--- New: Initialize contracts and tournament info on player load
+-- Initialize contracts and tournament info on player load
 RegisterNetEvent('esx:playerLoaded', function()
     Wait(2000)
-    activeContracts = lib.callback.await('lunar_fishing:getActiveContracts', false) or {}
-    activeTournament = lib.callback.await('lunar_fishing:getTournamentInfo', false)
+    CreateThread(function()
+        Wait(1000)
+        if lib.callback then
+            activeContracts = lib.callback.await('lunar_fishing:getActiveContracts', 1000) or {}
+            activeTournament = lib.callback.await('lunar_fishing:getTournamentInfo', 1000)
+        end
+    end)
 end)
 
 RegisterNetEvent('QBCore:Client:OnPlayerLoaded', function()
     Wait(2000)
-    activeContracts = lib.callback.await('lunar_fishing:getActiveContracts', false) or {}
-    activeTournament = lib.callback.await('lunar_fishing:getTournamentInfo', false)
+    CreateThread(function()
+        Wait(1000)
+        if lib.callback then
+            activeContracts = lib.callback.await('lunar_fishing:getActiveContracts', 1000) or {}
+            activeTournament = lib.callback.await('lunar_fishing:getTournamentInfo', 1000)
+        end
+    end)
 end)
 
--- New: Show helpful hints for new players
-local function showFishingTips()
-    if GetCurrentLevel() <= 2 then
-        CreateThread(function()
-            Wait(5000)
-            ShowNotification('💡 Tip: Use better bait to catch fish faster!', 'inform')
-            Wait(15000)
-            ShowNotification('💡 Tip: Different zones have different fish - explore!', 'inform')
-            Wait(15000)
-            ShowNotification('💡 Tip: Weather affects your fishing success!', 'inform')
-        end)
-    end
-end
+-- Best fishing times notification system
+local bestTimesNotified = false
 
--- Show tips when player loads
-AddEventHandler('lunar_fishing:playerLoaded', showFishingTips)
-
--- New: Sound effects for different fish rarities
-local function playFishCaughtSound(rarity)
-    if rarity == 'legendary' or rarity == 'mythical' then
-        -- Play special sound for legendary catches
-        PlaySoundFrontend(-1, 'CHECKPOINT_PERFECT', 'HUD_MINI_GAME_SOUNDSET', true)
-    elseif rarity == 'epic' then
-        PlaySoundFrontend(-1, 'CHECKPOINT_NORMAL', 'HUD_MINI_GAME_SOUNDSET', true)
-    elseif rarity == 'rare' then
-        PlaySoundFrontend(-1, 'WAYPOINT_SET', 'HUD_FRONTEND_DEFAULT_SOUNDSET', true)
-    end
-end
-
--- Enhanced catch notification
-RegisterNetEvent('lunar_fishing:fishCaught', function(fishName, fishRarity, fishValue)
-    playFishCaughtSound(fishRarity)
-    
-    -- Update tournament progress if active
-    if activeTournament then
-        activeTournament.myProgress.totalValue = activeTournament.myProgress.totalValue + fishValue
-        activeTournament.myProgress.fishCaught = activeTournament.myProgress.fishCaught + 1
+CreateThread(function()
+    while true do
+        local hour = GetClockHours()
+        
+        -- Notify about best fishing times
+        if (hour == 5 or hour == 18) and not bestTimesNotified then
+            if hour == 5 then
+                ShowNotification('🌅 Dawn has arrived - perfect time for fishing!', 'success')
+            else
+                ShowNotification('🌆 Dusk is here - prime fishing time!', 'success')
+            end
+            bestTimesNotified = true
+        elseif hour ~= 5 and hour ~= 18 then
+            bestTimesNotified = false
+        end
+        
+        Wait(60000) -- Check every minute
     end
 end)

@@ -3,9 +3,9 @@ fx_version 'cerulean'
 game 'gta5'
 lua54 'yes'
 
-author 'Lunar Scripts'
-description 'Advanced Fishing'
-version '1.0.1'
+author 'Lunar Scripts - Enhanced Edition'
+description 'Advanced Fishing with Weather System, 25+ Fish Species, and Enhanced Features'
+version '2.0.0'
 
 files {
     'locales/*.json'
