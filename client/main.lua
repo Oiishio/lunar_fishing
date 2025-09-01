@@ -561,3 +561,47 @@ RegisterNetEvent('esx:playerLoaded', function()
 end)
 
 RegisterNetEvent('QBCore:Client:OnPlayerLoaded', function()
+    Wait(2000)
+    activeContracts = lib.callback.await('lunar_fishing:getActiveContracts', false) or {}
+    activeTournament = lib.callback.await('lunar_fishing:getTournamentInfo', false)
+end)
+
+-- New: Show helpful hints for new players
+local function showFishingTips()
+    if GetCurrentLevel() <= 2 then
+        CreateThread(function()
+            Wait(5000)
+            ShowNotification('💡 Tip: Use better bait to catch fish faster!', 'inform')
+            Wait(15000)
+            ShowNotification('💡 Tip: Different zones have different fish - explore!', 'inform')
+            Wait(15000)
+            ShowNotification('💡 Tip: Weather affects your fishing success!', 'inform')
+        end)
+    end
+end
+
+-- Show tips when player loads
+AddEventHandler('lunar_fishing:playerLoaded', showFishingTips)
+
+-- New: Sound effects for different fish rarities
+local function playFishCaughtSound(rarity)
+    if rarity == 'legendary' or rarity == 'mythical' then
+        -- Play special sound for legendary catches
+        PlaySoundFrontend(-1, 'CHECKPOINT_PERFECT', 'HUD_MINI_GAME_SOUNDSET', true)
+    elseif rarity == 'epic' then
+        PlaySoundFrontend(-1, 'CHECKPOINT_NORMAL', 'HUD_MINI_GAME_SOUNDSET', true)
+    elseif rarity == 'rare' then
+        PlaySoundFrontend(-1, 'WAYPOINT_SET', 'HUD_FRONTEND_DEFAULT_SOUNDSET', true)
+    end
+end
+
+-- Enhanced catch notification
+RegisterNetEvent('lunar_fishing:fishCaught', function(fishName, fishRarity, fishValue)
+    playFishCaughtSound(fishRarity)
+    
+    -- Update tournament progress if active
+    if activeTournament then
+        activeTournament.myProgress.totalValue = activeTournament.myProgress.totalValue + fishValue
+        activeTournament.myProgress.fishCaught = activeTournament.myProgress.fishCaught + 1
+    end
+end)
