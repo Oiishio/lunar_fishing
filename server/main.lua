@@ -36,25 +36,6 @@ local weatherCycle = {
 
 local weatherIndex = 1
 
--- Enhanced: Get current time period (server-side)
-local function getCurrentTimePeriod()
-    local hour = tonumber(os.date('%H'))
-    
-    for period, data in pairs(Config.timeEffects) do
-        if data.startHour <= data.endHour then
-            if hour >= data.startHour and hour <= data.endHour then
-                return period, data
-            end
-        else
-            if hour >= data.startHour or hour <= data.endHour then
-                return period, data
-            end
-        end
-    end
-    
-    return 'day', { waitMultiplier = 1.0, chanceBonus = 0, message = 'Standard fishing conditions.' }
-end
-
 -- Enhanced: Get current season (server-side)  
 local function getCurrentSeason()
     local month = tonumber(os.date('%m'))
@@ -68,9 +49,39 @@ local function getCurrentSeason()
     return 'spring', Config.seasons.spring
 end
 
--- Enhanced: Calculate environmental effects
-local function calculateEnvironmentalEffects(currentZone)
-    local timePeriod, timeData = getCurrentTimePeriod()
+-- FIXED: Enhanced: Calculate environmental effects using CLIENT TIME
+local function calculateEnvironmentalEffects(currentZone, clientHour)
+    -- Use client-provided hour instead of server os.date
+    local hour = clientHour or 12 -- fallback to noon if no hour provided
+    
+    print('[DEBUG] Server using client hour:', hour)
+    
+    local timePeriod = 'day'
+    local timeData = { waitMultiplier = 1.0, chanceBonus = 0, message = 'Standard fishing conditions.' }
+    
+    -- Use the same logic as client
+    if hour >= 5 and hour <= 7 then
+        timePeriod = 'dawn'
+        timeData = Config.timeEffects.dawn
+    elseif hour >= 8 and hour <= 11 then
+        timePeriod = 'morning'
+        timeData = Config.timeEffects.morning
+    elseif hour >= 12 and hour <= 14 then
+        timePeriod = 'noon'
+        timeData = Config.timeEffects.noon
+    elseif hour >= 15 and hour <= 17 then
+        timePeriod = 'afternoon'
+        timeData = Config.timeEffects.afternoon
+    elseif hour >= 18 and hour <= 20 then
+        timePeriod = 'dusk'
+        timeData = Config.timeEffects.dusk
+    elseif hour >= 21 or hour <= 4 then
+        timePeriod = 'night'
+        timeData = Config.timeEffects.night
+    end
+    
+    print('[DEBUG] Server calculated time period:', timePeriod)
+    
     local season, seasonData = getCurrentSeason()
     local weather = currentServerWeather
     
@@ -183,7 +194,7 @@ end
 ---@type table<integer, boolean>
 local busy = {}
 
--- Enhanced fishing rod usage with weather system
+-- FIXED: Enhanced fishing rod usage with CLIENT TIME synchronization
 for _, rod in ipairs(Config.fishingRods) do
     Framework.registerUsableItem(rod.name, function(source)
         local player = Framework.getPlayerFromId(source)
@@ -220,8 +231,15 @@ for _, rod in ipairs(Config.fishingRods) do
             return
         end
         
-        -- Enhanced: Use weather-aware fish selection
-        local environmentalEffects = calculateEnvironmentalEffects(currentZone and Config.fishingZones[currentZone.index] or nil)
+        -- FIXED: GET CLIENT TIME FIRST
+        local clientHour = lib.callback.await('lunar_fishing:getClientHour', source)
+        print('[DEBUG] Got client hour from client:', clientHour)
+        
+        -- Enhanced: Use weather-aware fish selection WITH CLIENT TIME
+        local environmentalEffects = calculateEnvironmentalEffects(
+            currentZone and Config.fishingZones[currentZone.index] or nil, 
+            clientHour
+        )
         local fishName = getWeatherAwareFish(fishList, environmentalEffects, currentZone and Config.fishingZones[currentZone.index] or nil)
 
         if not player:canCarryItem(fishName, 1) then
@@ -325,8 +343,10 @@ lib.callback.register('lunar_fishing:getCurrentWeather', function(source)
     return currentServerWeather
 end)
 
+-- FIXED: Environmental effects now use client time
 lib.callback.register('lunar_fishing:getEnvironmentalEffects', function(source)
-    return calculateEnvironmentalEffects(nil)
+    local clientHour = lib.callback.await('lunar_fishing:getClientHour', source)
+    return calculateEnvironmentalEffects(nil, clientHour)
 end)
 
 -- Admin weather control
@@ -351,11 +371,15 @@ RegisterNetEvent('lunar_fishing:setWeather', function(weather)
     print(('[FISHING] Admin %s changed weather to: %s'):format(GetPlayerName(source), weather))
 end)
 
--- Weather info request
+-- FIXED: Weather info request using client time
 RegisterNetEvent('lunar_fishing:requestWeatherInfo', function()
     local source = source
-    local effects = calculateEnvironmentalEffects(nil)
     
+    -- Get client time first
+    local clientHour = lib.callback.await('lunar_fishing:getClientHour', source)
+    local effects = calculateEnvironmentalEffects(nil, clientHour)
+    
+    -- Send data back to client
     TriggerClientEvent('lunar_fishing:weatherInfo', source, effects)
 end)
 

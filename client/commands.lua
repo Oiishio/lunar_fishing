@@ -6,31 +6,28 @@ local function getCurrentWeatherType()
     return serverWeather or 'CLEAR'
 end
 
--- Get current time period client-side (fixed order)
+-- FIXED: Get current time period client-side - CONSISTENT WITH SERVER 
 local function getCurrentTimePeriod()
     local hour = GetClockHours()
     
-    -- Check in the correct order to avoid midnight range conflicts
-    local timeOrder = { 'dawn', 'morning', 'noon', 'afternoon', 'dusk', 'night' }
+    print('[DEBUG] Commands client hour:', hour)
     
-    for _, period in ipairs(timeOrder) do
-        local data = Config.timeEffects[period]
-        if data then
-            if data.startHour <= data.endHour then
-                -- Normal time range (e.g., 8-11)
-                if hour >= data.startHour and hour <= data.endHour then
-                    return period, data
-                end
-            else
-                -- Time range that crosses midnight (e.g., 21-4)  
-                if hour >= data.startHour or hour <= data.endHour then
-                    return period, data
-                end
-            end
-        end
+    -- Use the same logic as server and main client
+    if hour >= 5 and hour <= 7 then
+        return 'dawn', Config.timeEffects.dawn
+    elseif hour >= 8 and hour <= 11 then
+        return 'morning', Config.timeEffects.morning
+    elseif hour >= 12 and hour <= 14 then
+        return 'noon', Config.timeEffects.noon
+    elseif hour >= 15 and hour <= 17 then
+        return 'afternoon', Config.timeEffects.afternoon
+    elseif hour >= 18 and hour <= 20 then
+        return 'dusk', Config.timeEffects.dusk
+    elseif hour >= 21 or hour <= 4 then
+        return 'night', Config.timeEffects.night
+    else
+        return 'day', { waitMultiplier = 1.0, chanceBonus = 0, message = 'Standard fishing conditions.' }
     end
-    
-    return 'day', { waitMultiplier = 1.0, chanceBonus = 0, message = 'Standard fishing conditions.' }
 end
 
 -- Get current season client-side
@@ -46,6 +43,32 @@ local function getCurrentSeason()
     end
     return 'spring', Config.seasons.spring
 end
+
+-- NEW: Debug command to help troubleshoot time issues
+RegisterCommand('debugtime', function()
+    local hour = GetClockHours()
+    local minute = GetClockMinutes()
+    local timePeriod, timeData = getCurrentTimePeriod()
+    
+    local info = {}
+    table.insert(info, ('🕐 Raw Hour: %d'):format(hour))
+    table.insert(info, ('🕐 Raw Minute: %d'):format(minute))
+    table.insert(info, ('⏰ Detected Period: %s'):format(timePeriod))
+    table.insert(info, ('💾 Config Key: %s'):format(timeData and 'Found' or 'Missing'))
+    
+    if timeData then
+        table.insert(info, ('📊 Chance Bonus: %d%%'):format(timeData.chanceBonus or 0))
+        table.insert(info, ('⚡ Wait Multiplier: %.2f'):format(timeData.waitMultiplier or 1))
+    end
+    
+    ShowNotification(table.concat(info, '\n'), 'inform')
+    
+    -- Also print to console for debugging
+    print('[DEBUG TIME] Hour:', hour, 'Period:', timePeriod)
+    print('[DEBUG TIME] Config check - Dawn:', Config.timeEffects.dawn ~= nil)
+    print('[DEBUG TIME] Config check - Dusk:', Config.timeEffects.dusk ~= nil)
+    print('[DEBUG TIME] Config check - Night:', Config.timeEffects.night ~= nil)
+end, false)
 
 -- Command to show fishing zones and their requirements
 RegisterCommand('fishzones', function()
@@ -138,9 +161,58 @@ RegisterCommand('fishconditions', function()
     ShowNotification(table.concat(info, '\n'), 'inform')
 end, false)
 
--- Enhanced weather info command
+-- Enhanced weather info command - FIXED VERSION (CLIENT-SIDE ONLY)
 RegisterCommand('fishweather', function()
-    TriggerServerEvent('lunar_fishing:requestWeatherInfo')
+    -- Calculate everything CLIENT-SIDE instead of asking server
+    local weather = getCurrentWeatherType()
+    local hour = GetClockHours()
+    local timePeriod, timeData = getCurrentTimePeriod()
+    local season, seasonData = getCurrentSeason()
+    
+    -- Calculate effects client-side
+    local effects = {
+        weather = weather,
+        time = timePeriod,
+        season = season,
+        waitMultiplier = 1.0,
+        chanceMultiplier = 1.0
+    }
+    
+    -- Apply weather effects
+    if Config.weatherEffects[weather] then
+        local weatherEffect = Config.weatherEffects[weather]
+        effects.waitMultiplier = effects.waitMultiplier * weatherEffect.waitMultiplier
+        effects.chanceMultiplier = effects.chanceMultiplier * (1 + (weatherEffect.chanceBonus or 0) / 100)
+    end
+    
+    -- Apply time effects  
+    if timeData.waitMultiplier then
+        effects.waitMultiplier = effects.waitMultiplier * timeData.waitMultiplier
+    end
+    if timeData.chanceBonus then
+        effects.chanceMultiplier = effects.chanceMultiplier * (1 + timeData.chanceBonus / 100)
+    end
+    
+    -- Show the info directly (no server involved)
+    local info = {}
+    table.insert(info, '🌤️ CLIENT Environmental Conditions:')
+    table.insert(info, ('Weather: %s'):format(weather))
+    table.insert(info, ('Time: %s (Hour: %d)'):format(timePeriod:upper(), hour))
+    table.insert(info, ('Season: %s'):format(season:upper()))
+    
+    if effects.chanceMultiplier > 1.0 then
+        table.insert(info, ('🌟 Total Bonus: +%d%% catch rate'):format(math.floor((effects.chanceMultiplier - 1) * 100)))
+    elseif effects.chanceMultiplier < 1.0 then
+        table.insert(info, ('⚠️ Total Penalty: %d%% catch rate'):format(math.floor((1 - effects.chanceMultiplier) * 100)))
+    end
+    
+    if effects.waitMultiplier < 1.0 then
+        table.insert(info, ('⚡ Fishing Speed: +%d%%'):format(math.floor((1 - effects.waitMultiplier) * 100)))
+    elseif effects.waitMultiplier > 1.0 then
+        table.insert(info, ('🐌 Fishing Speed: -%d%%'):format(math.floor((effects.waitMultiplier - 1) * 100)))
+    end
+    
+    ShowNotification(table.concat(info, '\n'), 'inform')
 end, false)
 
 -- Command to show fish rarity guide
@@ -443,6 +515,30 @@ RegisterCommand('setfishweather', function(source, args)
     ShowNotification(('Weather change requested: %s'):format(weather), 'inform')
 end, false)
 
+-- Add the test command for debugging
+RegisterCommand('testtime', function()
+    local hour = GetClockHours()
+    local period, data = getCurrentTimePeriod()
+    
+    local testInfo = {}
+    table.insert(testInfo, ('CLIENT ONLY TEST:'))
+    table.insert(testInfo, ('Raw Hour: %d'):format(hour))
+    table.insert(testInfo, ('Detected Period: %s'):format(period))
+    table.insert(testInfo, ('Should be DUSK if hour 18-20'))
+    
+    -- Test specific ranges
+    if hour >= 18 and hour <= 20 then
+        table.insert(testInfo, ('✅ CORRECT: Hour %d should be DUSK'):format(hour))
+        if period ~= 'dusk' then
+            table.insert(testInfo, ('❌ ERROR: Detected %s instead of dusk'):format(period))
+        end
+    end
+    
+    ShowNotification(table.concat(testInfo, '\n'), hour >= 18 and hour <= 20 and period == 'dusk' and 'success' or 'error')
+    
+    print('[TEST TIME] Hour:', hour, 'Period:', period)
+end, false)
+
 -- Register chat suggestions for easier access
 TriggerEvent('chat:addSuggestion', '/fishinfo', 'Show detailed fishing information')
 TriggerEvent('chat:addSuggestion', '/fishzones', 'View all fishing zones')
@@ -454,4 +550,6 @@ TriggerEvent('chat:addSuggestion', '/fishtips', 'Get helpful fishing tips')
 TriggerEvent('chat:addSuggestion', '/fishseason', 'Check current fishing season')
 TriggerEvent('chat:addSuggestion', '/fishgear', 'Check your current equipment')
 TriggerEvent('chat:addSuggestion', '/fishhelp', 'Show all fishing commands')
+TriggerEvent('chat:addSuggestion', '/debugtime', 'Debug time period detection')
+TriggerEvent('chat:addSuggestion', '/testtime', 'Test time period calculation')
 TriggerEvent('chat:addSuggestion', '/setfishweather', 'Admin: Change fishing weather', {{name = 'weather', help = 'CLEAR|RAIN|THUNDER|FOGGY|SNOW'}})

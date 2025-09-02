@@ -24,47 +24,49 @@ local timeDisplay = nil
 -- Enhanced: Server-synced weather system
 local serverWeather = 'CLEAR'
 
-RegisterNetEvent('lunar_fishing:weatherChanged', function(weather)
-    local oldWeather = serverWeather
-    serverWeather = weather
-    
-    -- Show weather change notification with effects
-    if oldWeather ~= weather then
-        showWeatherChangeEffect(weather)
-    end
-end)
-
-RegisterNetEvent('lunar_fishing:weatherInfo', function(effects)
-    -- Don't show notification if it's a duplicate from the keybind callback
-    if effects and effects.weather then
-        local info = {}
-        table.insert(info, '🌤️ Server Environmental Conditions:')
-        table.insert(info, ('Weather: %s'):format(effects.weather))
-        table.insert(info, ('Time: %s'):format(effects.time:upper()))
-        table.insert(info, ('Season: %s'):format(effects.season:upper()))
-        
-        if effects.chanceMultiplier and effects.chanceMultiplier > 1.0 then
-            table.insert(info, ('🌟 Total Bonus: +%d%% catch rate'):format(math.floor((effects.chanceMultiplier - 1) * 100)))
-        elseif effects.chanceMultiplier and effects.chanceMultiplier < 1.0 then
-            table.insert(info, ('⚠️ Total Penalty: %d%% catch rate'):format(math.floor((1 - effects.chanceMultiplier) * 100)))
-        end
-        
-        if effects.waitMultiplier and effects.waitMultiplier < 1.0 then
-            table.insert(info, ('⚡ Fishing Speed: +%d%%'):format(math.floor((1 - effects.waitMultiplier) * 100)))
-        elseif effects.waitMultiplier and effects.waitMultiplier > 1.0 then
-            table.insert(info, ('🐌 Fishing Speed: -%d%%'):format(math.floor((effects.waitMultiplier - 1) * 100)))
-        end
-        
-        ShowNotification(table.concat(info, '\n'), 'inform')
-    end
-end)
-
 -- Enhanced: Use server weather instead of client detection
 local function getCurrentWeatherType()
     return serverWeather
 end
 
--- Enhanced: Weather change notifications with detailed effects
+-- FIXED: Get current time period (client-side) - CONSISTENT WITH SERVER
+local function getCurrentTimePeriod()
+    local hour = GetClockHours()
+    
+    print('[DEBUG] Client hour:', hour) -- Debug line
+    
+    if hour >= 5 and hour <= 7 then
+        print('[DEBUG] Client time period: dawn')
+        return 'dawn', Config.timeEffects.dawn
+    elseif hour >= 8 and hour <= 11 then
+        print('[DEBUG] Client time period: morning')
+        return 'morning', Config.timeEffects.morning
+    elseif hour >= 12 and hour <= 14 then
+        print('[DEBUG] Client time period: noon')
+        return 'noon', Config.timeEffects.noon
+    elseif hour >= 15 and hour <= 17 then
+        print('[DEBUG] Client time period: afternoon')
+        return 'afternoon', Config.timeEffects.afternoon
+    elseif hour >= 18 and hour <= 20 then
+        print('[DEBUG] Client time period: dusk')
+        return 'dusk', Config.timeEffects.dusk
+    elseif hour >= 21 or hour <= 4 then
+        print('[DEBUG] Client time period: night')
+        return 'night', Config.timeEffects.night
+    else
+        print('[DEBUG] Client time period: fallback day')
+        return 'day', { waitMultiplier = 1.0, chanceBonus = 0, message = 'Standard fishing conditions.' }
+    end
+end
+
+-- FIXED: NEW CALLBACK - Send client time to server
+lib.callback.register('lunar_fishing:getClientHour', function()
+    local hour = GetClockHours()
+    print('[DEBUG] Client sending hour to server:', hour)
+    return hour
+end)
+
+-- Enhanced: Weather change notifications with detailed effects - DEFINED BEFORE USE
 local function showWeatherChangeEffect(weather)
     local effect = Config.weatherEffects[weather]
     if not effect then return end
@@ -91,6 +93,43 @@ local function showWeatherChangeEffect(weather)
     
     ShowNotification(message, effect.chanceBonus >= 0 and 'success' or 'warn')
 end
+
+-- NOW the event handlers can use the function
+RegisterNetEvent('lunar_fishing:weatherChanged', function(weather)
+    local oldWeather = serverWeather
+    serverWeather = weather
+    
+    -- Show weather change notification with effects
+    if oldWeather ~= weather then
+        showWeatherChangeEffect(weather)
+    end
+end)
+
+-- FIXED: No double notification
+RegisterNetEvent('lunar_fishing:weatherInfo', function(effects)
+    -- Only show notification when explicitly requested via command
+    if effects and effects.weather then
+        local info = {}
+        table.insert(info, '🌤️ Server Environmental Conditions:')
+        table.insert(info, ('Weather: %s'):format(effects.weather))
+        table.insert(info, ('Time: %s'):format(effects.time:upper()))
+        table.insert(info, ('Season: %s'):format(effects.season:upper()))
+        
+        if effects.chanceMultiplier and effects.chanceMultiplier > 1.0 then
+            table.insert(info, ('🌟 Total Bonus: +%d%% catch rate'):format(math.floor((effects.chanceMultiplier - 1) * 100)))
+        elseif effects.chanceMultiplier and effects.chanceMultiplier < 1.0 then
+            table.insert(info, ('⚠️ Total Penalty: %d%% catch rate'):format(math.floor((1 - effects.chanceMultiplier) * 100)))
+        end
+        
+        if effects.waitMultiplier and effects.waitMultiplier < 1.0 then
+            table.insert(info, ('⚡ Fishing Speed: +%d%%'):format(math.floor((1 - effects.waitMultiplier) * 100)))
+        elseif effects.waitMultiplier and effects.waitMultiplier > 1.0 then
+            table.insert(info, ('🐌 Fishing Speed: -%d%%'):format(math.floor((effects.waitMultiplier - 1) * 100)))
+        end
+        
+        ShowNotification(table.concat(info, '\n'), 'inform')
+    end
+end)
 
 ---@param level number
 local function updateBlips(level)
@@ -214,10 +253,7 @@ local function setCanRagdoll(state)
     SetPedRagdollOnCollision(cache.ped, state)
 end
 
--- Enhanced: fishing with full environmental effects
----@param bait FishingBait
----@param fish Fish  
----@param envEffects table Environmental effects from server
+-- FIXED: Enhanced fishing with proper status display using CLIENT TIME
 lib.callback.register('lunar_fishing:itemUsed', function(bait, fish, envEffects)
     local zone = currentZone and Config.fishingZones[currentZone.index] or Config.outside
 
@@ -226,20 +262,30 @@ lib.callback.register('lunar_fishing:itemUsed', function(bait, fish, envEffects)
     lib.requestAnimDict('amb@world_human_stand_fishing@idle_a')
     setCanRagdoll(false)
     
-    -- Enhanced: Show environmental information
+    -- FIXED: Enhanced environmental information display using CLIENT TIME
     local weather = getCurrentWeatherType()
     local weatherEffect = Config.weatherEffects[weather]
+    
+    -- Get the actual current time period from the client
+    local timePeriod, timeData = getCurrentTimePeriod()
+    
+    print('[DEBUG] Fishing UI - Current time period:', timePeriod)
     
     local statusText = locale('cancel')
     local bonusTexts = {}
     
+    -- Weather bonus
     if weatherEffect and weatherEffect.chanceBonus ~= 0 then
         local bonusText = weatherEffect.chanceBonus > 0 and '+' or ''
         table.insert(bonusTexts, ('Weather: %s%d%%'):format(bonusText, weatherEffect.chanceBonus))
     end
     
-    if envEffects.timeMessage and envEffects.timeMessage ~= 'Standard fishing conditions.' then
-        table.insert(bonusTexts, envEffects.time:upper())
+    -- Time bonus - use the actual current time period from CLIENT
+    if timeData and timeData.chanceBonus and timeData.chanceBonus ~= 0 then
+        local bonusText = timeData.chanceBonus > 0 and '+' or ''
+        table.insert(bonusTexts, ('%s: %s%d%%'):format(timePeriod:upper(), bonusText, timeData.chanceBonus))
+    elseif timePeriod and timePeriod ~= 'day' then
+        table.insert(bonusTexts, timePeriod:upper())
     end
     
     if #bonusTexts > 0 then
@@ -247,8 +293,6 @@ lib.callback.register('lunar_fishing:itemUsed', function(bait, fish, envEffects)
     end
     
     ShowUI(statusText, 'ban')
-    
-    -- Remove duplicate notifications - let server handle environmental messages
 
     local p = promise.new()
 
@@ -342,32 +386,6 @@ end)
 -- Enhanced: Weather and time monitoring system
 local lastWeather = nil
 local lastTimePeriod = nil
-
-local function getCurrentTimePeriod()
-    local hour = GetClockHours()
-    
-    -- Check in the correct order to avoid midnight range conflicts
-    local timeOrder = { 'dawn', 'morning', 'noon', 'afternoon', 'dusk', 'night' }
-    
-    for _, period in ipairs(timeOrder) do
-        local data = Config.timeEffects[period]
-        if data then
-            if data.startHour <= data.endHour then
-                -- Normal time range (e.g., 8-11)
-                if hour >= data.startHour and hour <= data.endHour then
-                    return period, data
-                end
-            else
-                -- Time range that crosses midnight (e.g., 21-4)
-                if hour >= data.startHour or hour <= data.endHour then
-                    return period, data
-                end
-            end
-        end
-    end
-    
-    return 'day', { waitMultiplier = 1.0, chanceBonus = 0, message = 'Standard fishing conditions.' }
-end
 
 -- Enhanced: Environmental change monitoring (reduced notifications)
 CreateThread(function()
